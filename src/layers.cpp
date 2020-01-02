@@ -13,8 +13,11 @@
 #include "layers.h"
 #include "flappie_stdlib.h"
 #include "util.h"
+//#define GPU 
+#ifdef GPU
 #include <cuda_runtime.h>
 #include <cublas_v2.h>
+#endif
 
 //#include "hw/ekf_hw.h"
 //#include "ref_model/ekf_sw.h"
@@ -759,9 +762,11 @@ flappie_matrix aes_grumod_linear( const_flappie_matrix X, const_flappie_matrix s
     RETURN_NULL_IF(NULL == X, NULL);
     assert(NULL != sW);
 
+#ifdef GPU
     cudaError_t cudaStat ; // cudaMalloc status
     cublasStatus_t stat ; // CUBLAS functions status
     cublasHandle_t handle ; // CUBLAS context
+#endif
 
     const size_t size = sW->nr;
     const size_t N = X->nc;
@@ -799,6 +804,8 @@ flappie_matrix aes_grumod_linear( const_flappie_matrix X, const_flappie_matrix s
     //float *Cin, *Cout, *A, *Bnext;
     float Cin[768], Cout[768], A[256*768]; 
     float *Bnext;
+
+#ifdef GPU
     float *d_a, *d_x, *d_y;	
     cudaStat = cudaMalloc (( void **)& d_a , 768*256*sizeof(float)); // device // memory alloc for a
     cudaStat = cudaMalloc (( void **)& d_x , 256*sizeof(float)); // device // memory alloc for x
@@ -806,6 +813,7 @@ flappie_matrix aes_grumod_linear( const_flappie_matrix X, const_flappie_matrix s
     float al =1.0f;
     float bet =0.0f;
     stat = cublasCreate (&handle);
+#endif
 
     for (int i = 1; i < N; i++) {
       #pragma HLS pipeline
@@ -844,9 +852,11 @@ flappie_matrix aes_grumod_linear( const_flappie_matrix X, const_flappie_matrix s
         	memset(Cout + size + size, 0, size *sizeof(float));
 
         	cblas_sgemv(CblasColMajor, CblasTrans, 256, 768, 1.0, A, 256, B, 1, 1.0, Cout, 1);
+#ifdef GPU
 		stat = cublasSetMatrix (M,N, sizeof(float),A,M,d_a,M); 
 		stat = cublasSetVector (N,sizeof(float),B,1,d_x,1); 
 		stat = cublasSetVector (M,sizeof(float),Cout,1,d_y,1); 
+#endif
 
         	for (size_t i = 0; i < size; i++) {
                 	Cout[i] = LOGISTICF(Cout[i]); 
@@ -872,10 +882,12 @@ flappie_matrix aes_grumod_linear( const_flappie_matrix X, const_flappie_matrix s
     xColTmp = free_flappie_matrix(xColTmp);
     assert(validate_flappie_matrix (ostate, -1.0, 1.0, 0.0, true, __FILE__, __LINE__));
 
+#ifdef GPU
     cudaFree (d_a ); 
     cudaFree (d_x );
     cudaFree (d_y );
     cublasDestroy ( handle );
+#endif
     return Xnext;
 }
 

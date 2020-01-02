@@ -1,0 +1,19 @@
+Determining if the include file hdf5.h exists failed with the following output:
+Change Dir: /home/guest-intern/git/jan-2/flappie-x-cpp-gpu/build/CMakeFiles/CMakeTmp
+
+Run Build Command:"/usr/bin/make" "cmTC_d33b7/fast"
+make[1]: Entering directory '/home/guest-intern/git/jan-2/flappie-x-cpp-gpu/build/CMakeFiles/CMakeTmp'
+/usr/bin/make -f CMakeFiles/cmTC_d33b7.dir/build.make CMakeFiles/cmTC_d33b7.dir/build
+make[2]: Entering directory '/home/guest-intern/git/jan-2/flappie-x-cpp-gpu/build/CMakeFiles/CMakeTmp'
+Building C object CMakeFiles/cmTC_d33b7.dir/CheckIncludeFile.c.o
+/usr/bin/cc     -o CMakeFiles/cmTC_d33b7.dir/CheckIncludeFile.c.o   -c /home/guest-intern/git/jan-2/flappie-x-cpp-gpu/build/CMakeFiles/CMakeTmp/CheckIncludeFile.c
+/home/guest-intern/git/jan-2/flappie-x-cpp-gpu/build/CMakeFiles/CMakeTmp/CheckIncludeFile.c:1:18: fatal error: hdf5.h: No such file or directory
+compilation terminated.
+CMakeFiles/cmTC_d33b7.dir/build.make:65: recipe for target 'CMakeFiles/cmTC_d33b7.dir/CheckIncludeFile.c.o' failed
+make[2]: *** [CMakeFiles/cmTC_d33b7.dir/CheckIncludeFile.c.o] Error 1
+make[2]: Leaving directory '/home/guest-intern/git/jan-2/flappie-x-cpp-gpu/build/CMakeFiles/CMakeTmp'
+Makefile:126: recipe for target 'cmTC_d33b7/fast' failed
+make[1]: *** [cmTC_d33b7/fast] Error 2
+make[1]: Leaving directory '/home/guest-intern/git/jan-2/flappie-x-cpp-gpu/build/CMakeFiles/CMakeTmp'
+
+

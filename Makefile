@@ -28,6 +28,6 @@ clean:
 
 ${buildDir}/flappie: ${buildDir}
 	cd ${buildDir} && \
-        cmake ..  -DCMAKE_VERBOSE_MAKEFILE:BOOL=ON -DCMAKE_CXX_FLAGS="-std=c++11 -Wno-sign-compare -march=native  -Wno-format  -g  -fpermissive   -DUSE_SSE2  -D__USE_MISC -D_POSIX_SOURCE -DNDEBUG" -DCMAKE_BUILD_TYPE=${releaseType} -DOPENBLAS_ROOT=/usr -DHDF5_ROOT=${hdf5Root} && \
+        cmake .. -DCMAKE_CXX_COMPILER=nvcc -DCMAKE_VERBOSE_MAKEFILE:BOOL=ON -DCMAKE_CXX_FLAGS="-std=c++11 -g  -DUSE_SSE2  -D__USE_MISC -D_POSIX_SOURCE -DNDEBUG" -DCMAKE_BUILD_TYPE=${releaseType} -DOPENBLAS_ROOT=/usr -DHDF5_ROOT=${hdf5Root} && \
 	make flappie
     

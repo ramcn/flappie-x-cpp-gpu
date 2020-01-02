@@ -13,6 +13,8 @@
 #include "layers.h"
 #include "flappie_stdlib.h"
 #include "util.h"
+#include <cuda_runtime.h>
+#include <cublas_v2.h>
 
 //#include "hw/ekf_hw.h"
 //#include "ref_model/ekf_sw.h"
@@ -757,6 +759,10 @@ flappie_matrix aes_grumod_linear( const_flappie_matrix X, const_flappie_matrix s
     RETURN_NULL_IF(NULL == X, NULL);
     assert(NULL != sW);
 
+    cudaError_t cudaStat ; // cudaMalloc status
+    cublasStatus_t stat ; // CUBLAS functions status
+    cublasHandle_t handle ; // CUBLAS context
+
     const size_t size = sW->nr;
     const size_t N = X->nc;
     assert(X->nr == 3 * size);
@@ -793,6 +799,13 @@ flappie_matrix aes_grumod_linear( const_flappie_matrix X, const_flappie_matrix s
     //float *Cin, *Cout, *A, *Bnext;
     float Cin[768], Cout[768], A[256*768]; 
     float *Bnext;
+    float *d_a, *d_x, *d_y;	
+    cudaStat = cudaMalloc (( void **)& d_a , 768*256*sizeof(float)); // device // memory alloc for a
+    cudaStat = cudaMalloc (( void **)& d_x , 256*sizeof(float)); // device // memory alloc for x
+    cudaStat = cudaMalloc (( void **)& d_y , 768*sizeof(float)); // device // memory alloc for y
+    float al =1.0f;
+    float bet =0.0f;
+    stat = cublasCreate (&handle);
 
     for (int i = 1; i < N; i++) {
       #pragma HLS pipeline
@@ -823,6 +836,7 @@ flappie_matrix aes_grumod_linear( const_flappie_matrix X, const_flappie_matrix s
         { 
                 //flappie_matrix Cin = &xCol; flappie_matrix Cout = xColTmp;  flappie_matrix A = sW; flappie_matrix Bnext = &sCol2;
                 float *B;
+		int M=768, N=256;
                 if(backward) B = Bnext + 256; //B is ostate
                 else B = Bnext - 256;
         	const size_t size = 256;
@@ -830,6 +844,9 @@ flappie_matrix aes_grumod_linear( const_flappie_matrix X, const_flappie_matrix s
         	memset(Cout + size + size, 0, size *sizeof(float));
 
         	cblas_sgemv(CblasColMajor, CblasTrans, 256, 768, 1.0, A, 256, B, 1, 1.0, Cout, 1);
+		stat = cublasSetMatrix (M,N, sizeof(float),A,M,d_a,M); 
+		stat = cublasSetVector (N,sizeof(float),B,1,d_x,1); 
+		stat = cublasSetVector (M,sizeof(float),Cout,1,d_y,1); 
 
         	for (size_t i = 0; i < size; i++) {
                 	Cout[i] = LOGISTICF(Cout[i]); 
@@ -855,6 +872,10 @@ flappie_matrix aes_grumod_linear( const_flappie_matrix X, const_flappie_matrix s
     xColTmp = free_flappie_matrix(xColTmp);
     assert(validate_flappie_matrix (ostate, -1.0, 1.0, 0.0, true, __FILE__, __LINE__));
 
+    cudaFree (d_a ); 
+    cudaFree (d_x );
+    cudaFree (d_y );
+    cublasDestroy ( handle );
     return Xnext;
 }
 

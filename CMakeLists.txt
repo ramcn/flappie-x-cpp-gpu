@@ -58,6 +58,7 @@ configure_file (
 #   Set up include directories
 ##
 include_directories ("${PROJECT_BINARY_DIR}/include")
+include_directories ("/usr/local/cuda-10.2/targets/x86_64-linux/include")
 if (OPENBLAS_ROOT)
 	message("*********************************************************++++++++++++++++++++++++++++++++")
 	message(${OPENBLAS_ROOT})

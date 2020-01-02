@@ -838,6 +838,7 @@ flappie_matrix aes_grumod_linear( const_flappie_matrix X, const_flappie_matrix s
 		memcpy(A, sW->data.f, 256*768*sizeof(float)); 
 		//memcpy(Bnext, sCol2.data.f, 256 * sizeof(float));
 		Bnext = sCol2.data.f; 
+
         }
 
         // COMPUTE
@@ -850,6 +851,14 @@ flappie_matrix aes_grumod_linear( const_flappie_matrix X, const_flappie_matrix s
         	const size_t size = 256;
         	memcpy(Cout, Cin, 768 * sizeof(float) );
         	memset(Cout + size + size, 0, size *sizeof(float));
+
+                if(backward) {
+       			XnextBuf.data.f = Xnext->data.f + (index+1) * Xnext->nr;
+		}else {
+       			XnextBuf.data.f = Xnext->data.f + (index-1) * Xnext->nr;
+		}
+        	cblas_sgemv(CblasColMajor, CblasTrans, W->nr, W->nc, 1.0, W->data.f, W->stride, B, 1, 1.0, XnextBuf.data.f, 1);
+        	//cblas_sgemv(CblasColMajor, CblasTrans, W->nr, W->nc, 1.0, W->data.f, W->stride, Bnext, 1, 1.0, sCol2.data.f, 1);
 
         	cblas_sgemv(CblasColMajor, CblasTrans, 256, 768, 1.0, A, 256, B, 1, 1.0, Cout, 1);
 #ifdef GPU
@@ -866,13 +875,6 @@ flappie_matrix aes_grumod_linear( const_flappie_matrix X, const_flappie_matrix s
                 	Bnext[i] = Cout[i] * B[i] + Bnext[i];
         	}
 
-                if(backward) {
-       			XnextBuf.data.f = Xnext->data.f + (index+1) * Xnext->nr;
-		}else {
-       			XnextBuf.data.f = Xnext->data.f + (index-1) * Xnext->nr;
-		}
-        	cblas_sgemv(CblasColMajor, CblasTrans, W->nr, W->nc, 1.0, W->data.f, W->stride, B, 1, 1.0, XnextBuf.data.f, 1);
-        	//cblas_sgemv(CblasColMajor, CblasTrans, W->nr, W->nc, 1.0, W->data.f, W->stride, Bnext, 1, 1.0, sCol2.data.f, 1);
 	}
 
 	// STORE

@@ -63,6 +63,8 @@ flappie_matrix grumod_backward(const_flappie_matrix X, const_flappie_matrix sW, 
 flappie_matrix aes_grumod_linear(const_flappie_matrix X, const_flappie_matrix sW, flappie_matrix ostate, int backward, const_flappie_matrix W, const_flappie_matrix b);
 
 flappie_matrix aes_grumod(const_flappie_matrix X, const_flappie_matrix sW, flappie_matrix ostate, bool backward);
+flappie_matrix aes_grumod_linear_gpu( const_flappie_matrix X, const_flappie_matrix sW, flappie_matrix ostate, int backward, const_flappie_matrix W, const_flappie_matrix b);
+
 
 void grumod_step(const_flappie_matrix x, const_flappie_matrix istate,
                  const_flappie_matrix sW, flappie_matrix xF,

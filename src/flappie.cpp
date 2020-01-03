@@ -23,7 +23,6 @@
 #include "flappie_stdlib.h"
 #include "flappie_structures.h"
 #include "util.h"
-#include "version.h"
 
 #if !defined(FLAPPIE_VERSION)
 #    define FLAPPIE_VERSION "unknown"

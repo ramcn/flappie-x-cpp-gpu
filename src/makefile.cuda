@@ -1,0 +1,14 @@
+CC=g++
+NVCC=nvcc
+CXXFLAGS= -O3 -std=c++11
+CUDAFLAGS= -std=c++11 -c -I/usr/local/cuda/samples/common/inc 
+LIBS= -lpthread -lcudart -lcublas
+LIBDIRS=-L/usr/local/cuda-10.2/lib64
+INCDIRS=-I/usr/local/cuda-10.2/include
+grugpu.o: grugpu.cu
+	$(NVCC) $(CUDAFLAGS)  grugpu.cu
+all: grugpu.o 
+	$(CC) -o test test.cpp grugpu.o $(LIBDIRS) $(INCDIRS) $(LIBS) $(CXXFLAGS)
+clean:
+	rm -rf test *.o
+

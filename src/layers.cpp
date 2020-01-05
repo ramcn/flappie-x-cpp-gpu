@@ -795,7 +795,7 @@ flappie_matrix aes_grumod_linear( const_flappie_matrix X, const_flappie_matrix s
     }
 
     /* Affine transform */
-    //cblas_sgemm(CblasColMajor, CblasTrans, CblasNoTrans, W->nc, X->nc, W->nr, 1.0, W->data.f, W->stride, X->data.f, X->stride, 1.0, Xnext->data.f, Xnext->stride);
+    cblas_sgemm(CblasColMajor, CblasTrans, CblasNoTrans, W->nc, X->nc, W->nr, 1.0, W->data.f, W->stride, X->data.f, X->stride, 1.0, Xnext->data.f, Xnext->stride);
 
     //float *Cin, *Cout, *A, *Bnext;
     float Cin[768], Cout[768], A[256*768]; 
@@ -817,7 +817,7 @@ flappie_matrix aes_grumod_linear( const_flappie_matrix X, const_flappie_matrix s
 	  	        index = i;
            		xCol.data.f = X->data.f + index * X->nr;
            		ostate_ptr = ostate->data.f + index * ostate->nr;
-                       istate_ptr = ostate_ptr - 256;
+                        istate_ptr = ostate_ptr - 256;
 		}
     		memcpy(Cin, xCol.data.f, 768*sizeof(float)); 
 		memcpy(Cout, xColTmp->data.f, 768*sizeof(float));  
@@ -832,13 +832,6 @@ flappie_matrix aes_grumod_linear( const_flappie_matrix X, const_flappie_matrix s
         	memcpy(Cout, Cin, 768 * sizeof(float) );
         	memset(Cout + size + size, 0, size *sizeof(float));
 
-                if(backward) {
-       			XnextBuf.data.f = Xnext->data.f + (index+1) * Xnext->nr;
-		}else {
-       			XnextBuf.data.f = Xnext->data.f + (index-1) * Xnext->nr;
-		}
-        	cblas_sgemv(CblasColMajor, CblasTrans, W->nr, W->nc, 1.0, W->data.f, W->stride, istate_ptr, 1, 1.0, XnextBuf.data.f, 1);
-        	//cblas_sgemv(CblasColMajor, CblasTrans, W->nr, W->nc, 1.0, W->data.f, W->stride, Bnext, 1, 1.0, sCol2.data.f, 1);
         	cblas_sgemv(CblasColMajor, CblasTrans, 256, 768, 1.0, A, 256, istate_ptr, 1, 1.0, Cout, 1);
 
         	for (size_t i = 0; i < size; i++) {

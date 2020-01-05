@@ -794,9 +794,13 @@ flappie_matrix aes_grumod_linear( const_flappie_matrix X, const_flappie_matrix s
         memcpy(Xnext->data.v + c * Xnext->nrq, b->data.v, Xnext->nrq * sizeof(__m128));
     }
 
+    /* Affine transform */
+    //cblas_sgemm(CblasColMajor, CblasTrans, CblasNoTrans, W->nc, X->nc, W->nr, 1.0, W->data.f, W->stride, X->data.f, X->stride, 1.0, Xnext->data.f, Xnext->stride);
+
     //float *Cin, *Cout, *A, *Bnext;
     float Cin[768], Cout[768], A[256*768]; 
-    float *Bnext;
+    float *ostate_ptr;
+    float *istate_ptr;
 
     for (int i = 1; i < N; i++) {
       #pragma HLS pipeline
@@ -806,32 +810,25 @@ flappie_matrix aes_grumod_linear( const_flappie_matrix X, const_flappie_matrix s
         	if(backward) {
 	   		index = N - i - 1;
            		xCol.data.f = X->data.f + index * X->nr;
-           		sCol1.data.f = ostate->data.f + (index + 1) * ostate->nr;
-           		sCol2.data.f = ostate->data.f + index * ostate->nr;
+           		ostate_ptr = ostate->data.f + index * ostate->nr;
+                	istate_ptr = ostate_ptr + 256;
 	}
 		else {
 	  	        index = i;
            		xCol.data.f = X->data.f + index * X->nr;
-           		sCol1.data.f = ostate->data.f + (index - 1) * ostate->nr;
-           		sCol2.data.f = ostate->data.f + index * ostate->nr;
+           		ostate_ptr = ostate->data.f + index * ostate->nr;
+                       istate_ptr = ostate_ptr - 256;
 		}
-    		//Cin = xCol.data.f; Cout = xColTmp->data.f;  A = sW->data.f; Bnext = sCol2.data.f;
     		memcpy(Cin, xCol.data.f, 768*sizeof(float)); 
 		memcpy(Cout, xColTmp->data.f, 768*sizeof(float));  
 		memcpy(A, sW->data.f, 256*768*sizeof(float)); 
-		//memcpy(Bnext, sCol2.data.f, 256 * sizeof(float));
-		Bnext = sCol2.data.f; 
 
         }
 
         // COMPUTE
         { 
-                //flappie_matrix Cin = &xCol; flappie_matrix Cout = xColTmp;  flappie_matrix A = sW; flappie_matrix Bnext = &sCol2;
-                float *B;
-		int M=768, N=256;
-                if(backward) B = Bnext + 256; //B is ostate
-                else B = Bnext - 256;
-        	const size_t size = 256;
+    		int M=768, N=256;
+    		const size_t size = 256;
         	memcpy(Cout, Cin, 768 * sizeof(float) );
         	memset(Cout + size + size, 0, size *sizeof(float));
 
@@ -840,17 +837,16 @@ flappie_matrix aes_grumod_linear( const_flappie_matrix X, const_flappie_matrix s
 		}else {
        			XnextBuf.data.f = Xnext->data.f + (index-1) * Xnext->nr;
 		}
-        	cblas_sgemv(CblasColMajor, CblasTrans, W->nr, W->nc, 1.0, W->data.f, W->stride, B, 1, 1.0, XnextBuf.data.f, 1);
+        	cblas_sgemv(CblasColMajor, CblasTrans, W->nr, W->nc, 1.0, W->data.f, W->stride, istate_ptr, 1, 1.0, XnextBuf.data.f, 1);
         	//cblas_sgemv(CblasColMajor, CblasTrans, W->nr, W->nc, 1.0, W->data.f, W->stride, Bnext, 1, 1.0, sCol2.data.f, 1);
-
-        	cblas_sgemv(CblasColMajor, CblasTrans, 256, 768, 1.0, A, 256, B, 1, 1.0, Cout, 1);
+        	cblas_sgemv(CblasColMajor, CblasTrans, 256, 768, 1.0, A, 256, istate_ptr, 1, 1.0, Cout, 1);
 
         	for (size_t i = 0; i < size; i++) {
                 	Cout[i] = LOGISTICF(Cout[i]); 
                 	Cout[size+i] = LOGISTICF(Cout[size+i]); 
                 	Cout[i+size+size] = TANHF(Cout[i+size] * Cout[i+size+size] + Cin[i+size+size]); 
-                	Bnext[i] = (-1) * Cout[i] * Cout[i+size+size] + Cout[i+size+size]; 
-                	Bnext[i] = Cout[i] * B[i] + Bnext[i];
+                	ostate_ptr[i] = (-1) * Cout[i] * Cout[i+size+size] + Cout[i+size+size]; 
+                	ostate_ptr[i] = Cout[i] * istate_ptr[i] + ostate_ptr[i];
         	}
 
 	}

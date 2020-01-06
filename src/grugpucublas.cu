@@ -12,7 +12,8 @@
 
 #include <cblas.h>
 
-#define GEMV
+//#define CUBLAS
+//#define GEMV
 
 __global__ void kernel (void){
   extern __shared__ float shared[];
@@ -48,6 +49,12 @@ __global__ void spmv_csr_vector_kernel ( const int num_rows , const float * data
 flappie_matrix aes_grumod_linear_gpu( const_flappie_matrix X, const_flappie_matrix sW, flappie_matrix ostate, int backward, const_flappie_matrix W, const_flappie_matrix b) {
     RETURN_NULL_IF(NULL == X, NULL);
     assert(NULL != sW);
+
+#ifdef CUBLAS
+    cudaError_t cudaStat ; // cudaMalloc status
+    cublasStatus_t stat ; // CUBLAS functions status
+    cublasHandle_t handle ; // CUBLAS context
+#endif
 
 #ifdef GEMV
     cudaError_t cudaStat ; // cudaMalloc status
@@ -88,6 +95,17 @@ flappie_matrix aes_grumod_linear_gpu( const_flappie_matrix X, const_flappie_matr
 
     float Cin[768], Cout[768], A[256*768];
     float *Bnext;
+
+#ifdef CUBLAS
+    float *d_a, *d_x, *d_y;
+    cudaStat = cudaMalloc (( void **)& d_a , 768*256*sizeof(float)); // device // memory alloc for a
+    cudaStat = cudaMalloc (( void **)& d_x , 256*sizeof(float)); // device // memory alloc for x
+    cudaStat = cudaMalloc (( void **)& d_y , 768*sizeof(float)); // device // memory alloc for y
+    float al =1.0f;
+    float bet =1.0f;
+    stat = cublasCreate (&handle);
+    grugpu();
+#endif
 
 #ifdef GEMV
     float *d_a, *d_x, *d_y;
@@ -132,16 +150,22 @@ flappie_matrix aes_grumod_linear_gpu( const_flappie_matrix X, const_flappie_matr
                 memcpy(Cout, Cin, 768 * sizeof(float) );
                 memset(Cout + size + size, 0, size *sizeof(float));
 
+                cblas_sgemv(CblasRowMajor, CblasNoTrans, 768, 256, 1.0, A, 256, B, 1, 1.0, Cout, 1);
+#ifdef CUBLAS
+                stat = cublasSetMatrix (M,N, sizeof(float),A,M,d_a,M);
+                stat = cublasSetVector (N,sizeof(float),B,1,d_x,1);
+                stat = cublasSetVector (M,sizeof(float),Cout,1,d_y,1);
+ 		stat=cublasSgemv(handle,CUBLAS_OP_T,M,N,&al,d_a, M,d_x,1,&bet, d_y,1);
+		stat = cublasGetVector (M, sizeof(float) ,d_y ,1 ,Cout ,1); 
+#endif
 #ifdef GEMV
                 int block_size = 512 ; //threads per block
-                int num_blocks = 768/16;
+                int num_blocks = M/16;
                 cudaMemcpy(d_a, A, M*N*sizeof(float), cudaMemcpyHostToDevice);
                 cudaMemcpy(d_x, B, N*sizeof(float), cudaMemcpyHostToDevice);
                 cudaMemcpy(d_y, Cout, M*sizeof(float), cudaMemcpyHostToDevice);
                 spmv_csr_vector_kernel<<<num_blocks, block_size>>>(M, d_a, d_x, d_y);
                 cudaMemcpy(Cout, d_y, M*sizeof(float), cudaMemcpyDeviceToHost);
-#else
-                cblas_sgemv(CblasRowMajor, CblasNoTrans, 768, 256, 1.0, A, 256, B, 1, 1.0, Cout, 1);
 #endif
 
                 for (size_t i = 0; i < size; i++) {
@@ -158,6 +182,13 @@ flappie_matrix aes_grumod_linear_gpu( const_flappie_matrix X, const_flappie_matr
     } // end of N iterations
     xColTmp = free_flappie_matrix(xColTmp);
     assert(validate_flappie_matrix (ostate, -1.0, 1.0, 0.0, true, __FILE__, __LINE__));
+
+#ifdef CUBLAS
+    cudaFree (d_a );
+    cudaFree (d_x );
+    cudaFree (d_y );
+    cublasDestroy ( handle );
+#endif
 
 #ifdef GEMV
     cudaFree (d_a );

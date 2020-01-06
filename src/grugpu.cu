@@ -21,7 +21,7 @@ __global__ void kernel (void){
   const int bid = blockIdx.x;
 }
 
-__global__ void spmv_csr_vector_kernel ( const int num_rows , const float * data , const float * x , float * y) {
+__global__ void spmv_csr_vector_kernel ( const int num_rows , int num_cols, const float * data , const float * x , float * y) {
         __shared__ float vals [768];
         int thread_id = blockDim.x * blockIdx.x + threadIdx.x ; // global thread index
         int warp_id = thread_id / 32; // global warp index
@@ -31,7 +31,7 @@ __global__ void spmv_csr_vector_kernel ( const int num_rows , const float * data
         if ( row < num_rows ){
                 // compute running sum per thread
                 vals [ threadIdx.x ] = 0;
-                for ( int jj = 0 + lane ; jj < num_rows ; jj += 32)
+                for ( int jj = 0 + lane ; jj < num_cols ; jj += 32)
                   vals [ threadIdx.x ] += data [ jj ] * x [jj];
                 // parallel reduction in shared memory
                 if ( lane < 16) vals [ threadIdx.x ] += vals [ threadIdx.x + 16];
@@ -138,7 +138,7 @@ flappie_matrix aes_grumod_linear_gpu( const_flappie_matrix X, const_flappie_matr
                 cudaMemcpy(d_a, A, M*N*sizeof(float), cudaMemcpyHostToDevice);
                 cudaMemcpy(d_x, B, N*sizeof(float), cudaMemcpyHostToDevice);
                 cudaMemcpy(d_y, Cout, M*sizeof(float), cudaMemcpyHostToDevice);
-                spmv_csr_vector_kernel<<<num_blocks, block_size>>>(M, d_a, d_x, d_y);
+                spmv_csr_vector_kernel<<<num_blocks, block_size>>>(M, N, d_a, d_x, d_y);
                 cudaMemcpy(Cout, d_y, M*sizeof(float), cudaMemcpyDeviceToHost);
 #else
                 cblas_sgemv(CblasRowMajor, CblasNoTrans, 768, 256, 1.0, A, 256, B, 1, 1.0, Cout, 1);

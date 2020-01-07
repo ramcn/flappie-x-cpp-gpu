@@ -21,6 +21,22 @@ __global__ void kernel (void){
   const int bid = blockIdx.x;
 }
 
+
+ __global__ void
+ spmv_csr_scalar_kernel ( const int num_rows , const int cols , const float * data , const float * x , float * y)
+ {
+     int row = blockDim.x * blockIdx.x + threadIdx.x ;
+     float dot = 0; 
+     if( row < num_rows )
+     {
+         for (int jj = 0 ; jj < cols ; jj ++)
+             dot += data [ (row*cols)+jj ] * x[ jj ];
+         y[ row ] += dot ;
+     }
+ }
+ 
+
+
 __global__ void spmv_csr_vector_kernel ( const int num_rows , int num_cols, const float * data , const float * x , float * y) {
         __shared__ float vals [768];
         int thread_id = blockDim.x * blockIdx.x + threadIdx.x ; // global thread index
@@ -36,7 +52,7 @@ __global__ void spmv_csr_vector_kernel ( const int num_rows , int num_cols, cons
                 // compute running sum per thread
                 vals [ threadIdx.x ] = 0;
                 for ( int jj = 0 + lane ; jj < num_cols ; jj += 32)
-                  vals [ threadIdx.x ] += data [ jj ] * x [jj];
+                  vals [ threadIdx.x ] += data [ (row*num_cols)+jj ] * x [jj];
                 // parallel reduction in shared memory
                 if ( lane < 16) vals [ threadIdx.x ] += vals [ threadIdx.x + 16];
                 if ( lane < 8) vals [ threadIdx.x ] += vals [ threadIdx.x + 8];
@@ -91,7 +107,8 @@ flappie_matrix aes_grumod_linear_gpu( const_flappie_matrix X, const_flappie_matr
     }
 
     float Cin[768], Cout[768], A[256*768];
-    float *Bnext;
+    float *ostate_ptr;
+    float *istate_ptr;
 
 #ifdef GEMV
     float *d_a, *d_x, *d_y;
@@ -110,28 +127,24 @@ flappie_matrix aes_grumod_linear_gpu( const_flappie_matrix X, const_flappie_matr
                 if(backward) {
                         index = N - i - 1;
                         xCol.data.f = X->data.f + index * X->nr;
-                        sCol1.data.f = ostate->data.f + (index + 1) * ostate->nr;
-                        sCol2.data.f = ostate->data.f + index * ostate->nr;
-        }
+                        ostate_ptr = ostate->data.f + index * ostate->nr;
+                        istate_ptr = ostate_ptr + 256;
+        	}
                 else {
                         index = i;
                         xCol.data.f = X->data.f + index * X->nr;
-                        sCol1.data.f = ostate->data.f + (index - 1) * ostate->nr;
-                        sCol2.data.f = ostate->data.f + index * ostate->nr;
+                        ostate_ptr = ostate->data.f + index * ostate->nr;
+                        istate_ptr = ostate_ptr - 256;
                 }
+
                 memcpy(Cin, xCol.data.f, 768*sizeof(float));
                 memcpy(Cout, xColTmp->data.f, 768*sizeof(float));
                 memcpy(A, sW->data.f, 256*768*sizeof(float));
-                Bnext = sCol2.data.f;
-
         }
 
         // COMPUTE
         {
-                float *B;
                 int M=768, N=256;
-                if(backward) B = Bnext + 256; //B is ostate
-                else B = Bnext - 256;
                 const size_t size = 256;
                 memcpy(Cout, Cin, 768 * sizeof(float) );
                 memset(Cout + size + size, 0, size *sizeof(float));
@@ -142,20 +155,21 @@ flappie_matrix aes_grumod_linear_gpu( const_flappie_matrix X, const_flappie_matr
 		int rows_per_thread = 768/threads_per_row;
                 int num_blocks = 768/rows_per_thread;
                 cudaMemcpy(d_a, A, M*N*sizeof(float), cudaMemcpyHostToDevice);
-                cudaMemcpy(d_x, B, N*sizeof(float), cudaMemcpyHostToDevice);
+                cudaMemcpy(d_x, istate_ptr, N*sizeof(float), cudaMemcpyHostToDevice);
                 cudaMemcpy(d_y, Cout, M*sizeof(float), cudaMemcpyHostToDevice);
-                spmv_csr_vector_kernel<<<num_blocks, block_size>>>(M, N, d_a, d_x, d_y);
+                //spmv_csr_vector_kernel<<<num_blocks, block_size>>>(M, N, d_a, d_x, d_y);
+                spmv_csr_scalar_kernel<<<1, 768>>>(M, N, d_a, d_x, d_y);
                 cudaMemcpy(Cout, d_y, M*sizeof(float), cudaMemcpyDeviceToHost);
 #else
-                cblas_sgemv(CblasRowMajor, CblasNoTrans, 768, 256, 1.0, A, 256, B, 1, 1.0, Cout, 1);
+                cblas_sgemv(CblasRowMajor, CblasNoTrans, 768, 256, 1.0, A, 256, istate_ptr, 1, 1.0, Cout, 1);
 #endif
 
                 for (size_t i = 0; i < size; i++) {
                         Cout[i] = LOGISTICF(Cout[i]);
                         Cout[size+i] = LOGISTICF(Cout[size+i]);
                         Cout[i+size+size] = TANHF(Cout[i+size] * Cout[i+size+size] + Cin[i+size+size]);
-                        Bnext[i] = (-1) * Cout[i] * Cout[i+size+size] + Cout[i+size+size];
-                        Bnext[i] = Cout[i] * B[i] + Bnext[i];
+                        ostate_ptr[i] = (-1) * Cout[i] * Cout[i+size+size] + Cout[i+size+size];
+                        ostate_ptr[i] = Cout[i] * istate_ptr[i] + ostate_ptr[i];
                 }
 
         }

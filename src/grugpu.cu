@@ -26,6 +26,10 @@ __global__ void spmv_csr_vector_kernel ( const int num_rows , int num_cols, cons
         int thread_id = blockDim.x * blockIdx.x + threadIdx.x ; // global thread index
         int warp_id = thread_id / 32; // global warp index
         int lane = thread_id & (32 - 1); // thread index within the warp
+
+
+        //printf("thread id =%d lane=%d warpid=%d\n", thread_id, lane, warp_id); // max thread id is 24576 max warp id is 768 and max lan is 31 
+	// max threadId.x is 768
         // one warp per row
         int row = warp_id ;
         if ( row < num_rows ){
@@ -39,7 +43,7 @@ __global__ void spmv_csr_vector_kernel ( const int num_rows , int num_cols, cons
                 if ( lane < 4) vals [ threadIdx.x ] += vals [ threadIdx.x + 4];
                 if ( lane < 2) vals [ threadIdx.x ] += vals [ threadIdx.x + 2];
                 if ( lane < 1) vals [ threadIdx.x ] += vals [ threadIdx.x + 1];
-                // first thread writes the result
+                // first thread OF EACH WARP ACCUMULATES the result
                 if ( lane == 0)
                   y[row] += vals [ threadIdx.x ];
         }
@@ -133,8 +137,10 @@ flappie_matrix aes_grumod_linear_gpu( const_flappie_matrix X, const_flappie_matr
                 memset(Cout + size + size, 0, size *sizeof(float));
 
 #ifdef GEMV
-                int block_size = 512 ; //threads per block
-                int num_blocks = 768/16;
+                int block_size = 768 ; //threads per block
+		int threads_per_row = 32; // warp size
+		int rows_per_thread = 768/threads_per_row;
+                int num_blocks = 768/rows_per_thread;
                 cudaMemcpy(d_a, A, M*N*sizeof(float), cudaMemcpyHostToDevice);
                 cudaMemcpy(d_x, B, N*sizeof(float), cudaMemcpyHostToDevice);
                 cudaMemcpy(d_y, Cout, M*sizeof(float), cudaMemcpyHostToDevice);

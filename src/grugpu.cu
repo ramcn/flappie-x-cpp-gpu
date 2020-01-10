@@ -14,13 +14,55 @@
 
 #define GEMV
 
-__global__ void kernel (void){
-  extern __shared__ float shared[];
-
-  const int tid = threadIdx.x;
-  const int bid = blockIdx.x;
+#    define _A 12102203.161561485f
+#    define _B 1065353216.0f
+#    define _BOUND 88.02969193111305
+__device__ static inline float gpu_expf(float x) {
+    x = fmaxf(-_BOUND, fminf(_BOUND, x));
+    union {
+        uint32_t i;
+        float f;
+    } value = {
+    .i = (uint32_t) (_A * x + _B)};
+    return value.f;
 }
 
+__device__ static inline float gpu_logisticf(float x) {
+    return 1.0 / (1.0 + gpu_expf(-x));
+}
+
+__device__ static inline float gpu_tanhf(float x) {
+    const float y = gpu_logisticf(x + x);
+    return y + y - 1.0;
+}
+
+
+ 
+ __global__ void
+ spmv_csr_scalar_kernel_with_activation ( const int num_rows , const int cols , const float * data , const float * x , float * y, float *cin)
+ {
+     int row = blockDim.x * blockIdx.x + threadIdx.x ;
+     float c1 = 0; 
+     float c2 = 0; 
+     float c3 = 0; 
+     if( row < num_rows )
+     {
+         for (int jj = 0 ; jj < cols ; jj ++) {
+             c1 += data [ (row*cols)+jj ] * x[ jj ];
+             c2 += data [ ((row+256)*cols)+jj ] * x[ jj ];
+             c3 += data [ ((row+512)*cols)+jj ] * x[ jj ];
+         }
+         y[row] += c1 ;
+         y[row+256] += c2 ;
+         y[row+512] += c3 ;
+     }
+
+      y[row] = gpu_logisticf(y[row]);
+      y[row+256] = gpu_logisticf(y[row+256]);
+      y[row+512] = gpu_tanhf(y[row+256] * y[row+512] + cin[row+512]);
+      y[row+256] = (-1) * y[row] * y[row+512] + y[row+512];
+      y[row] = y[row] * x[row] + y[row+256];
+ }
 
  __global__ void
  spmv_csr_scalar_kernel ( const int num_rows , const int cols , const float * data , const float * x , float * y)
@@ -34,14 +76,12 @@ __global__ void kernel (void){
          y[ row ] += dot ;
      }
  }
- 
-
 
 __global__ void spmv_csr_vector_kernel ( const int num_rows , int num_cols, const float * data , const float * x , float * y) {
         __shared__ float vals [768];
         int thread_id = blockDim.x * blockIdx.x + threadIdx.x ; // global thread index
-        int warp_id = thread_id / 32; // global warp index
-        int lane = thread_id & (32 - 1); // thread index within the warp
+        int warp_id = thread_id / 32 ; // global warp index
+        int lane = thread_id & (32-1) ; // thread index within the warp
 
 
         //printf("thread id =%d lane=%d warpid=%d\n", thread_id, lane, warp_id); // max thread id is 24576 max warp id is 768 and max lan is 31 
@@ -51,7 +91,7 @@ __global__ void spmv_csr_vector_kernel ( const int num_rows , int num_cols, cons
         if ( row < num_rows ){
                 // compute running sum per thread
                 vals [ threadIdx.x ] = 0;
-                for ( int jj = 0 + lane ; jj < num_cols ; jj += 32)
+                for ( int jj = 0 + lane ; jj < num_cols ; jj += 31)
                   vals [ threadIdx.x ] += data [ (row*num_cols)+jj ] * x [jj];
                 // parallel reduction in shared memory
                 if ( lane < 16) vals [ threadIdx.x ] += vals [ threadIdx.x + 16];
@@ -109,16 +149,17 @@ flappie_matrix aes_grumod_linear_gpu( const_flappie_matrix X, const_flappie_matr
     float Cin[768], Cout[768], A[256*768];
     float *ostate_ptr;
     float *istate_ptr;
+    int M=768, N=256;
 
 #ifdef GEMV
-    float *d_a, *d_x, *d_y;
+    float *d_a, *d_x, *d_y, *d_cin ;
     cudaStat = cudaMalloc (( void **)& d_a , 768*256*sizeof(float)); // device // memory alloc for a
     cudaStat = cudaMalloc (( void **)& d_x , 256*sizeof(float)); // device // memory alloc for x
     cudaStat = cudaMalloc (( void **)& d_y , 768*sizeof(float)); // device // memory alloc for y
+    cudaStat = cudaMalloc (( void **)& d_cin , 768*sizeof(float)); // device // memory alloc for cin 
     float al =1.0f;
     float bet =1.0f;
 #endif
-
 
     for (int i = 1; i < N; i++) {
         size_t index;
@@ -144,32 +185,35 @@ flappie_matrix aes_grumod_linear_gpu( const_flappie_matrix X, const_flappie_matr
 
         // COMPUTE
         {
-                int M=768, N=256;
                 const size_t size = 256;
                 memcpy(Cout, Cin, 768 * sizeof(float) );
                 memset(Cout + size + size, 0, size *sizeof(float));
 
 #ifdef GEMV
-                int block_size = 768 ; //threads per block
 		int threads_per_row = 32; // warp size
-		int rows_per_thread = 768/threads_per_row;
-                int num_blocks = 768/rows_per_thread;
-                cudaMemcpy(d_a, A, M*N*sizeof(float), cudaMemcpyHostToDevice);
+                int threads_per_block = 512 ; //threads per block
+		int rows_per_block = threads_per_block/threads_per_row; // 16
+                int num_blocks = 768/rows_per_block; // 48
+    		cudaMemcpy(d_a, A, M*N*sizeof(float), cudaMemcpyHostToDevice);
                 cudaMemcpy(d_x, istate_ptr, N*sizeof(float), cudaMemcpyHostToDevice);
                 cudaMemcpy(d_y, Cout, M*sizeof(float), cudaMemcpyHostToDevice);
-                //spmv_csr_vector_kernel<<<num_blocks, block_size>>>(M, N, d_a, d_x, d_y);
-                spmv_csr_scalar_kernel<<<1, 768>>>(M, N, d_a, d_x, d_y);
+                cudaMemcpy(d_cin, Cin, M*sizeof(float), cudaMemcpyHostToDevice);
+                //spmv_csr_vector_kernel<<<num_blocks, threads_per_block>>>(M, N, d_a, d_x, d_y);
+                //spmv_csr_scalar_kernel<<<1, 768>>>(M, N, d_a, d_x, d_y);
+                //spmv_csr_scalar_kernel_with_activation<<<1, 768>>>(M, N, d_a, d_x, d_y);
+                spmv_csr_scalar_kernel_with_activation<<<1, 256>>>(M/3, N, d_a, d_x, d_y, d_cin);
                 cudaMemcpy(Cout, d_y, M*sizeof(float), cudaMemcpyDeviceToHost);
 #else
                 cblas_sgemv(CblasRowMajor, CblasNoTrans, 768, 256, 1.0, A, 256, istate_ptr, 1, 1.0, Cout, 1);
 #endif
 
                 for (size_t i = 0; i < size; i++) {
-                        Cout[i] = LOGISTICF(Cout[i]);
-                        Cout[size+i] = LOGISTICF(Cout[size+i]);
-                        Cout[i+size+size] = TANHF(Cout[i+size] * Cout[i+size+size] + Cin[i+size+size]);
-                        ostate_ptr[i] = (-1) * Cout[i] * Cout[i+size+size] + Cout[i+size+size];
-                        ostate_ptr[i] = Cout[i] * istate_ptr[i] + ostate_ptr[i];
+                        //Cout[i] = LOGISTICF(Cout[i]);
+                        //Cout[size+i] = LOGISTICF(Cout[size+i]);
+                        //Cout[i+size+size] = TANHF(Cout[i+size] * Cout[i+size+size] + Cin[i+size+size]);
+                        //ostate_ptr[i] = (-1) * Cout[i] * Cout[i+size+size] + Cout[i+size+size];
+                        //ostate_ptr[i] = Cout[i] * istate_ptr[i] + ostate_ptr[i];
+                        ostate_ptr[i] = Cout[i];
                 }
 
         }

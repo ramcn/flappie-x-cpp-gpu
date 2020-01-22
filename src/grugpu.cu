@@ -222,6 +222,8 @@ flappie_matrix aes_grumod_linear_gpu( const_flappie_matrix X, const_flappie_matr
     cudaStat = cudaMalloc (( void **)& d_x , 256*sizeof(float)); // device // memory alloc for x
     cudaStat = cudaMalloc (( void **)& d_y , 768*sizeof(float)); // device // memory alloc for y
     cudaStat = cudaMalloc (( void **)& d_cin , 768*sizeof(float)); // device // memory alloc for cin 
+    memcpy(A, sW->data.f, 256*768*sizeof(float));
+    cudaMemcpy(d_a, A, 768*256*sizeof(float), cudaMemcpyHostToDevice);
     float al =1.0f;
     float bet =1.0f;
 #endif
@@ -245,7 +247,6 @@ flappie_matrix aes_grumod_linear_gpu( const_flappie_matrix X, const_flappie_matr
 
                 memcpy(Cin, xCol.data.f, 768*sizeof(float));
                 memcpy(Cout, xColTmp->data.f, 768*sizeof(float));
-    		memcpy(A, sW->data.f, 256*768*sizeof(float));
         }
 
         // COMPUTE
@@ -260,7 +261,6 @@ flappie_matrix aes_grumod_linear_gpu( const_flappie_matrix X, const_flappie_matr
                 int threads_per_block = 512 ; //threads per block 512 or 768
 		int rows_per_block = threads_per_block/threads_per_row; // 16 or 24
                 int num_blocks = 768/rows_per_block; // 48 or 32
-    		cudaMemcpy(d_a, A, 768*256*sizeof(float), cudaMemcpyHostToDevice);
                 cudaMemcpy(d_x, istate_ptr, N*sizeof(float), cudaMemcpyHostToDevice);
                 cudaMemcpy(d_y, Cout, M*sizeof(float), cudaMemcpyHostToDevice);
                 cudaMemcpy(d_cin, Cin, M*sizeof(float), cudaMemcpyHostToDevice);

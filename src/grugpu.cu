@@ -80,6 +80,7 @@ __device__ static inline float gpu_tanhf(float x) {
      float c1 = 0; 
      float c2 = 0; 
      float c3 = 0; 
+     float cinlocal = 0 ; 
      if( row < num_rows )
      {
          for (int jj = 0 ; jj < cols ; jj ++) {
@@ -89,14 +90,16 @@ __device__ static inline float gpu_tanhf(float x) {
          }
          y[row] += c1 ;
          y[row+256] += c2 ;
+	 cinlocal = y[row+512];
          y[row+512] += c3 ;
      }
 
       y[row] = gpu_logisticf(y[row]);
       y[row+256] = gpu_logisticf(y[row+256]);
+      //y[row+512] = gpu_tanhf(y[row+256] * y[row+512] + cinlocal);
       y[row+512] = gpu_tanhf(y[row+256] * y[row+512] + cin[row+512]);
-      y[row+256] = (-1) * y[row] * y[row+512] + y[row+512];
-      y[row] = y[row] * x[row] + y[row+256];
+      y[row+512] = (-1) * y[row] * y[row+512] + y[row+512];
+      y[row] = y[row] * x[row] + y[row+512];
  }
 
  __global__ void
@@ -140,7 +143,7 @@ __global__ void spmv_csr_vector_kernel ( const int num_rows , int num_cols, cons
 }
 
 __global__ void spmv_csr_vector_kernel_v2 ( const int num_rows , int num_cols, const float * data , const float * x , float * y) {
-        __shared__ float vals [256];
+        __shared__ float vals [512];
         int thread_id = blockDim.x * blockIdx.x + threadIdx.x ; // global thread index
         int warp_id = thread_id / 32 ; // global warp index
         int lane = thread_id & (32-1) ; // thread index within the warp
@@ -153,9 +156,9 @@ __global__ void spmv_csr_vector_kernel_v2 ( const int num_rows , int num_cols, c
         int row = warp_id ;
         if ( row < num_rows ){
                 // compute running sum per thread
-                vals [ local_warp_id * 16 + local_lane_id ] = 0;
+                vals [ local_warp_id * 32 + local_lane_id ] = 0;
                 for ( int jj = 0 + lane ; jj < num_cols ; jj += 31)
-                  vals [ local_warp_id * 16 + local_lane_id ] += data [ (row*num_cols)+jj ] * x [jj];
+                  vals [ local_warp_id * 32 + local_lane_id ] += data [ (row*num_cols)+jj ] * x [jj];
                 // parallel reduction in shared memory
                 if ( lane < 16) vals [ pos  ] += vals [ pos + 16];
                 if ( lane < 8) vals [ pos ] += vals [ pos + 8];
@@ -242,7 +245,7 @@ flappie_matrix aes_grumod_linear_gpu( const_flappie_matrix X, const_flappie_matr
 
                 memcpy(Cin, xCol.data.f, 768*sizeof(float));
                 memcpy(Cout, xColTmp->data.f, 768*sizeof(float));
-                memcpy(A, sW->data.f, 256*768*sizeof(float));
+    		memcpy(A, sW->data.f, 256*768*sizeof(float));
         }
 
         // COMPUTE
@@ -257,15 +260,15 @@ flappie_matrix aes_grumod_linear_gpu( const_flappie_matrix X, const_flappie_matr
                 int threads_per_block = 512 ; //threads per block 512 or 768
 		int rows_per_block = threads_per_block/threads_per_row; // 16 or 24
                 int num_blocks = 768/rows_per_block; // 48 or 32
-    		cudaMemcpy(d_a, A, M*N*sizeof(float), cudaMemcpyHostToDevice);
+    		cudaMemcpy(d_a, A, 768*256*sizeof(float), cudaMemcpyHostToDevice);
                 cudaMemcpy(d_x, istate_ptr, N*sizeof(float), cudaMemcpyHostToDevice);
                 cudaMemcpy(d_y, Cout, M*sizeof(float), cudaMemcpyHostToDevice);
                 cudaMemcpy(d_cin, Cin, M*sizeof(float), cudaMemcpyHostToDevice);
                 //spmv_csr_vector_kernel<<<num_blocks, threads_per_block>>>(M, N, d_a, d_x, d_y);
-                spmv_csr_vector_kernel_v2<<<num_blocks, threads_per_block>>>(M, N, d_a, d_x, d_y);
+                //spmv_csr_vector_kernel_v2<<<num_blocks, threads_per_block>>>(M, N, d_a, d_x, d_y);
                 //spmv_csr_scalar_kernel<<<1, 768>>>(M, N, d_a, d_x, d_y);
                 //spmv_csr_scalar_kernel_with_activation<<<1, 768>>>(M, N, d_a, d_x, d_y);
-                //spmv_csr_scalar_kernel_with_activation<<<1, 256>>>(M/3, N, d_a, d_x, d_y, d_cin);
+                spmv_csr_scalar_kernel_with_activation<<<1, 256>>>(M/3, N, d_a, d_x, d_y, d_cin);
                 //spmv_csr_scalar_kernel_with_activation_v2<<<32, 768>>>(M, N, d_a, d_x, d_y, d_cin);
                 cudaMemcpy(Cout, d_y, M*sizeof(float), cudaMemcpyDeviceToHost);
 #else
@@ -273,12 +276,12 @@ flappie_matrix aes_grumod_linear_gpu( const_flappie_matrix X, const_flappie_matr
 #endif
 
                 for (size_t i = 0; i < size; i++) {
-                        Cout[i] = LOGISTICF(Cout[i]);
-                        Cout[size+i] = LOGISTICF(Cout[size+i]);
-                        Cout[i+size+size] = TANHF(Cout[i+size] * Cout[i+size+size] + Cin[i+size+size]);
-                        ostate_ptr[i] = (-1) * Cout[i] * Cout[i+size+size] + Cout[i+size+size];
-                        ostate_ptr[i] = Cout[i] * istate_ptr[i] + ostate_ptr[i];
-                        //ostate_ptr[i] = Cout[i];
+                        //Cout[i] = LOGISTICF(Cout[i]);
+                        //Cout[size+i] = LOGISTICF(Cout[size+i]);
+                        //Cout[i+size+size] = TANHF(Cout[i+size] * Cout[i+size+size] + Cin[i+size+size]);
+                        //ostate_ptr[i] = (-1) * Cout[i] * Cout[i+size+size] + Cout[i+size+size];
+                        //ostate_ptr[i] = Cout[i] * istate_ptr[i] + ostate_ptr[i];
+                        ostate_ptr[i] = Cout[i];
                 }
 
         }

@@ -37,6 +37,89 @@ __device__ static inline float gpu_tanhf(float x) {
 }
 
 
+
+ __global__ void
+ spmv_csr_vector_kernel_with_activation ( const int num_rows , const int cols , const float * sW , const float *W, float * x , float * y, float *xnext, float *b, const int index1, float *d_g_y, int index2)
+ {
+     __shared__ float vals1 [512];
+     __shared__ float vals2 [512];
+     __shared__ float vals3 [512];
+     int thread_id = blockDim.x * blockIdx.x + threadIdx.x ; // global thread index
+     int warp_id = thread_id / 32 ; // global warp index
+     int lane = thread_id & (32-1) ; // thread index within the warp
+
+     int local_warp_id = threadIdx.x / 32;
+     int local_lane_id =  threadIdx.x % 32;
+     int pos = threadIdx.x;
+
+     float c1 = 0; float c2 = 0; float c3 = 0; float cinlocal = 0;
+   
+     y = d_g_y + index1 * 768;
+     xnext = d_g_y + index2 * 768;
+     // one warp per row
+     int row = warp_id ;
+
+     if( row < num_rows )
+     {
+         cinlocal = y[row+512];
+         y[row+512] = 0;
+         vals1 [ local_warp_id * 32 + local_lane_id ] = 0;
+         vals2 [ local_warp_id * 32 + local_lane_id ] = 0;
+         vals3 [ local_warp_id * 32 + local_lane_id ] = 0;
+
+         for ( int jj = 0 + lane ; jj < cols ; jj += 31) {
+              vals1 [ local_warp_id * 32 + local_lane_id ] += sW[ (row*cols)+jj ] * x [jj];
+              vals2 [ local_warp_id * 32 + local_lane_id ] += sW[ ((row+256)*cols)+jj ] * x [jj];
+              vals3 [ local_warp_id * 32 + local_lane_id ] += sW[ ((row+512)*cols)+jj ] * x [jj];
+	 }
+                // parallel reduction in shared memory
+                if ( lane < 16) { vals1 [ pos  ] += vals1 [ pos + 16]; vals2 [ pos  ] += vals2 [ pos + 16]; vals3 [ pos  ] += vals3 [ pos + 16];}
+                if ( lane < 8) { vals1 [ pos ] += vals1 [ pos + 8]; vals2 [ pos ] += vals2 [ pos + 8]; vals3 [ pos ] += vals3 [ pos + 8];}
+                if ( lane < 4) { vals1 [ pos  ] += vals1 [ pos + 4]; vals2 [ pos  ] += vals2 [ pos + 4]; vals3 [ pos  ] += vals3 [ pos + 4]; }
+                if ( lane < 2) { vals1 [ pos ] += vals1 [ pos + 2]; vals2 [ pos ] += vals2 [ pos + 2]; vals3 [ pos ] += vals3 [ pos + 2]; }
+                if ( lane < 1) { vals1 [ pos ] += vals1 [ pos + 1]; vals2 [ pos ] += vals2 [ pos + 1];vals3 [ pos ] += vals3 [ pos + 1]; }
+                // first thread OF EACH WARP ACCUMULATES the result
+                if ( lane == 0) {
+                  y[row] += vals1 [ local_lane_id ];
+                  y[row+256] += vals2 [ local_lane_id ];
+                  y[row+512] += vals3 [ local_lane_id ];
+      		  y[row] = gpu_logisticf(y[row]);
+      		  y[row+256] = gpu_logisticf(y[row+256]);
+      		  y[row+512] = gpu_tanhf(y[row+256] * y[row+512] + cinlocal);
+      		  y[row+512] = (-1) * y[row] * y[row+512] + y[row+512];
+      		  y[row] = y[row] * x[row] + y[row+512];
+                }
+     }
+
+      __syncthreads();
+
+      if( row < num_rows )
+      {
+      	 vals1 [ local_warp_id * 32 + local_lane_id ] = b[row];
+      	 vals2 [ local_warp_id * 32 + local_lane_id ] = b[row+256];
+      	 vals3 [ local_warp_id * 32 + local_lane_id ] = b[row+512];
+         for ( int jj = 0 + lane ; jj < cols ; jj += 31) {
+              vals1 [ local_warp_id * 32 + local_lane_id ] += W[ (row*cols)+jj ] * y [jj];
+              vals2 [ local_warp_id * 32 + local_lane_id ] += W[ ((row+256)*cols)+jj ] * y [jj];
+              vals3 [ local_warp_id * 32 + local_lane_id ] += W[ ((row+512)*cols)+jj ] * y [jj];
+         }
+                // parallel reduction in shared memory
+                if ( lane < 16) { vals1 [ pos  ] += vals1 [ pos + 16]; vals2 [ pos  ] += vals2 [ pos + 16]; vals3 [ pos  ] += vals3 [ pos + 16];}
+                if ( lane < 8) { vals1 [ pos ] += vals1 [ pos + 8]; vals2 [ pos ] += vals2 [ pos + 8]; vals3 [ pos ] += vals3 [ pos + 8];}
+                if ( lane < 4) { vals1 [ pos  ] += vals1 [ pos + 4]; vals2 [ pos  ] += vals2 [ pos + 4]; vals3 [ pos  ] += vals3 [ pos + 4]; }
+                if ( lane < 2) { vals1 [ pos ] += vals1 [ pos + 2]; vals2 [ pos ] += vals2 [ pos + 2]; vals3 [ pos ] += vals3 [ pos + 2]; }
+                if ( lane < 1) { vals1 [ pos ] += vals1 [ pos + 1]; vals2 [ pos ] += vals2 [ pos + 1];vals3 [ pos ] += vals3 [ pos + 1]; }
+                // first thread OF EACH WARP ACCUMULATES the result
+                if ( lane == 0) {
+         	  x[row] = y[row]; // next invocation istate is from current ostate
+                  xnext[row] += vals1 [ local_lane_id ];
+                  xnext[row+256] += vals2 [ local_lane_id ];
+                  xnext[row+512] += vals3 [ local_lane_id ];
+                }
+      }
+
+ }
+
  __global__ void
  spmv_csr_scalar_kernel_with_activation ( const int num_rows , const int cols , const float * sW , const float *W, float * x , float * y, float *xnext, float *b, const int index1, float *d_g_y, int index2)
  {
@@ -87,7 +170,6 @@ __device__ static inline float gpu_tanhf(float x) {
       }
 
  }
-
 
 float *d_g_y;
 
@@ -189,7 +271,8 @@ flappie_matrix aes_grumod_linear_gpu( const_flappie_matrix X, const_flappie_matr
                 if(i == 1) 
                   cudaMemcpy(d_x, istate_ptr, N*sizeof(float), cudaMemcpyHostToDevice);
                 //cudaMemcpy(d_y, xCol.data.f, M*sizeof(float), cudaMemcpyHostToDevice);
-                spmv_csr_scalar_kernel_with_activation<<<1, 256>>>(M/3, N, d_a1, d_a2, d_x, d_y, d_xnext, d_b, index, d_g_y, index2);
+                //spmv_csr_scalar_kernel_with_activation<<<1, 256>>>(M/3, N, d_a1, d_a2, d_x, d_y, d_xnext, d_b, index, d_g_y, index2);
+                spmv_csr_vector_kernel_with_activation<<<num_blocks, threads_per_block>>>(M, N, d_a1, d_a2, d_x, d_y, d_xnext, d_b, index, d_g_y, index2);
                 //cudaMemcpy(XnextBuf.data.f, d_xnext, M*sizeof(float), cudaMemcpyDeviceToHost);
 #else
                 cblas_sgemv(CblasRowMajor, CblasNoTrans, 768, 256, 1.0, A, 256, istate_ptr, 1, 1.0, Cout, 1);

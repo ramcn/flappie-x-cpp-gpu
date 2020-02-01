@@ -208,7 +208,6 @@ flappie_matrix aes_grumod_linear_gpu( const_flappie_matrix X, const_flappie_matr
     cudaFree (d_y );
     cudaFree (d_xnext );
     if(layer == 4) {
-        fprintf(stderr,"size of Xnext is %d %d\n",  W->nc, ostate->nc);
     	cudaMemcpy(Xnext->data.f, d_g_y, 768*N*sizeof(float), cudaMemcpyDeviceToHost);
         cudaFree (d_g_y );
     }

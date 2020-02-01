@@ -38,7 +38,7 @@ __device__ static inline float gpu_tanhf(float x) {
 
 
  __global__ void
- spmv_csr_scalar_kernel_with_activation ( const int num_rows , const int cols , const float * sW , const float *W, float * x , float * y, float *xnext, float *b, const int index, float *d_g_y)
+ spmv_csr_scalar_kernel_with_activation ( const int num_rows , const int cols , const float * sW , const float *W, float * x , float * y, float *xnext, float *b, const int index1, float *d_g_y, int index2)
  {
      int row = blockDim.x * blockIdx.x + threadIdx.x ;
      float c1 = 0; 
@@ -46,7 +46,8 @@ __device__ static inline float gpu_tanhf(float x) {
      float c3 = 0; 
      float cinlocal = 0;
    
-     y = d_g_y + index * 768;
+     y = d_g_y + index1 * 768;
+     xnext = d_g_y + index2 * 768;
 
      if( row < num_rows )
      {
@@ -81,8 +82,8 @@ __device__ static inline float gpu_tanhf(float x) {
              c3 += W [ ((row+512)*cols)+jj ] * y[ jj ];
          }
 	  
-         xnext[row] = c1; xnext[row+256] = c2 ; xnext[row+512] = c3;
          x[row] = y[row]; // next invocation istate is from current ostate
+         xnext[row] = c1; xnext[row+256] = c2 ; xnext[row+512] = c3;
       }
 
  }
@@ -140,10 +141,10 @@ flappie_matrix aes_grumod_linear_gpu( const_flappie_matrix X, const_flappie_matr
     cudaStat = cudaMalloc (( void **)& d_y , 768*sizeof(float)); // device // memory alloc for y
     cudaStat = cudaMalloc (( void **)& d_xnext , 768*sizeof(float)); // device // memory alloc for xnext 
     cudaStat = cudaMalloc (( void **)& d_b , 768*sizeof(float)); // device // memory alloc for bias 
-    if(d_g_y == NULL) {
+    if(layer == 1) {
       cudaStat = cudaMalloc (( void **)& d_g_y , 768*N*sizeof(float)); // device // memory alloc for x 
+      cudaMemcpy(d_g_y, X->data.f, 768*N*sizeof(float), cudaMemcpyHostToDevice);
     }
-    cudaMemcpy(d_g_y, X->data.f, 768*N*sizeof(float), cudaMemcpyHostToDevice);
     memcpy(A, sW->data.f, 256*768*sizeof(float));
     cudaMemcpy(d_a1, sW->data.f, 768*256*sizeof(float), cudaMemcpyHostToDevice);
     cudaMemcpy(d_a2, W->data.f, 768*256*sizeof(float), cudaMemcpyHostToDevice);
@@ -153,7 +154,7 @@ flappie_matrix aes_grumod_linear_gpu( const_flappie_matrix X, const_flappie_matr
 #endif
 
     for (int i = 1; i < N; i++) {
-        size_t index;
+        size_t index, index2;
         // LOAD
         {
                 if(backward) {
@@ -162,6 +163,7 @@ flappie_matrix aes_grumod_linear_gpu( const_flappie_matrix X, const_flappie_matr
                         ostate_ptr = ostate->data.f + index * ostate->nr;
                         istate_ptr = ostate_ptr + 256;
                         XnextBuf.data.f = Xnext->data.f + (index+1) * Xnext->nr;
+			index2 = index + 1;
                 }
 
                 else {
@@ -170,6 +172,7 @@ flappie_matrix aes_grumod_linear_gpu( const_flappie_matrix X, const_flappie_matr
                         ostate_ptr = ostate->data.f + index * ostate->nr;
                         istate_ptr = ostate_ptr - 256;
                         XnextBuf.data.f = Xnext->data.f + (index-1) * Xnext->nr;
+			index2 = index - 1; 
                 }
         }
 
@@ -186,8 +189,8 @@ flappie_matrix aes_grumod_linear_gpu( const_flappie_matrix X, const_flappie_matr
                 if(i == 1) 
                   cudaMemcpy(d_x, istate_ptr, N*sizeof(float), cudaMemcpyHostToDevice);
                 //cudaMemcpy(d_y, xCol.data.f, M*sizeof(float), cudaMemcpyHostToDevice);
-                spmv_csr_scalar_kernel_with_activation<<<1, 256>>>(M/3, N, d_a1, d_a2, d_x, d_y, d_xnext, d_b, index, d_g_y);
-                cudaMemcpy(XnextBuf.data.f, d_xnext, M*sizeof(float), cudaMemcpyDeviceToHost);
+                spmv_csr_scalar_kernel_with_activation<<<1, 256>>>(M/3, N, d_a1, d_a2, d_x, d_y, d_xnext, d_b, index, d_g_y, index2);
+                //cudaMemcpy(XnextBuf.data.f, d_xnext, M*sizeof(float), cudaMemcpyDeviceToHost);
 #else
                 cblas_sgemv(CblasRowMajor, CblasNoTrans, 768, 256, 1.0, A, 256, istate_ptr, 1, 1.0, Cout, 1);
                 cblas_sgemv(CblasRowMajor, CblasNoTrans, W->nc, W->nr, 1.0, W->data.f, W->stride, ostate_ptr, 1, 1.0, XnextBuf.data.f, 1);
@@ -204,6 +207,11 @@ flappie_matrix aes_grumod_linear_gpu( const_flappie_matrix X, const_flappie_matr
     cudaFree (d_x );
     cudaFree (d_y );
     cudaFree (d_xnext );
+    if(layer == 4) {
+        fprintf(stderr,"size of Xnext is %d %d\n",  W->nc, ostate->nc);
+    	cudaMemcpy(Xnext->data.f, d_g_y, 768*N*sizeof(float), cudaMemcpyDeviceToHost);
+        cudaFree (d_g_y );
+    }
 #endif
 
     //cblas_sgemm(CblasColMajor, CblasTrans, CblasNoTrans, W->nc, X->nc, W->nr, 1.0, W->data.f, W->stride, ostate->data.f, ostate->stride, 1.0, Xnext->data.f, Xnext->stride);

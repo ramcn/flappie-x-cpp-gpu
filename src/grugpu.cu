@@ -90,7 +90,7 @@ __device__ static inline float gpu_tanhf(float x) {
 
 float *d_g_y;
 
-flappie_matrix aes_grumod_linear_gpu( const_flappie_matrix X, const_flappie_matrix sW, flappie_matrix ostate, int backward, const_flappie_matrix W, const_flappie_matrix b) {
+flappie_matrix aes_grumod_linear_gpu( const_flappie_matrix X, const_flappie_matrix sW, flappie_matrix ostate, int backward, const_flappie_matrix W, const_flappie_matrix b, int layer) {
     RETURN_NULL_IF(NULL == X, NULL);
     assert(NULL != sW);
 

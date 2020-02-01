@@ -759,8 +759,6 @@ flappie_matrix aes_grumod_linear( const_flappie_matrix X, const_flappie_matrix s
     RETURN_NULL_IF(NULL == X, NULL);
     assert(NULL != sW);
 
-    grugpu();
-
     const size_t size = sW->nr;
     const size_t N = X->nc;
     assert(X->nr == 3 * size);

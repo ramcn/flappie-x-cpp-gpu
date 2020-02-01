@@ -245,20 +245,21 @@ flappie_matrix flipflop_guppy_transitions(const raw_table signal, float temperat
     flappie_matrix conv = convolution_linear(raw_mat, net->conv_W, net->conv_b, net->conv_stride, NULL, net->gruB1_iW, net->gruB1_b);
     raw_mat = free_flappie_matrix(raw_mat);
 
-    flappie_matrix gruB1 = aes_grumod_linear_gpu(conv, net->gruB1_sW, NULL, 1, net->gruF2_iW, net->gruF2_b );
+    flappie_matrix gruB1 = aes_grumod_linear_gpu(conv, net->gruB1_sW, NULL, 1, net->gruF2_iW, net->gruF2_b, 1 );
     conv = free_flappie_matrix(conv);
 
-    flappie_matrix gruF2 = aes_grumod_linear_gpu(gruB1, net->gruF2_sW, NULL, 0, net->gruB3_iW, net->gruB3_b );
+    flappie_matrix gruF2 = aes_grumod_linear_gpu(gruB1, net->gruF2_sW, NULL, 0, net->gruB3_iW, net->gruB3_b, 2 );
     gruB1 = free_flappie_matrix(gruB1);
 
-    flappie_matrix gruB3 = aes_grumod_linear_gpu(gruF2, net->gruB3_sW, NULL, 1, net->gruF4_iW, net->gruF4_b);
+    flappie_matrix gruB3 = aes_grumod_linear_gpu(gruF2, net->gruB3_sW, NULL, 1, net->gruF4_iW, net->gruF4_b, 3);
     gruF2 = free_flappie_matrix(gruF2);
 
-    flappie_matrix gruF4 = aes_grumod_linear_gpu(gruB3, net->gruF4_sW, NULL, 0, net->gruB5_iW, net->gruB5_b);
+    flappie_matrix gruF4 = aes_grumod_linear_gpu(gruB3, net->gruF4_sW, NULL, 0, net->gruB5_iW, net->gruB5_b, 4);
     gruB3 = free_flappie_matrix(gruB3);
 
     //flappie_matrix gruB5 = aes_grumod_linear(gruF4, net->gruB5_sW, NULL, 1, net->gruB5_iW, net->gruB5_b);
     flappie_matrix gruB5 = aes_grumod(gruF4, net->gruB5_sW, NULL, 1);
+    //flappie_matrix gruB5 = aes_grumod_linear_gpu(gruF4, net->gruB5_sW, NULL, 1, net->FF_W, net->FF_b);
     gruF4 = free_flappie_matrix(gruF4);
 
     flappie_matrix trans = globalnorm_flipflop(gruB5, net->FF_W, net->FF_b, temperature, NULL);

@@ -12,7 +12,7 @@
 
 #include <cblas.h>
 
-#define GEMV
+//#define GEMV
 
 #    define _A 12102203.161561485f
 #    define _B 1065353216.0f
@@ -51,6 +51,7 @@ __device__ static inline float gpu_tanhf(float x) {
      int local_warp_id = threadIdx.x / 32;
      int local_lane_id =  threadIdx.x % 32;
      int pos = threadIdx.x;
+     //int pos = local_warp_id * 32 + local_lane_id;
 
      float c1 = 0; float c2 = 0; float c3 = 0; float cinlocal = 0;
    
@@ -63,14 +64,14 @@ __device__ static inline float gpu_tanhf(float x) {
      {
          cinlocal = y[row+512];
          y[row+512] = 0;
-         vals1 [ local_warp_id * 32 + local_lane_id ] = 0;
-         vals2 [ local_warp_id * 32 + local_lane_id ] = 0;
-         vals3 [ local_warp_id * 32 + local_lane_id ] = 0;
+         vals1 [ pos ] = 0;
+         vals2 [ pos ] = 0;
+         vals3 [ pos ] = 0;
 
          for ( int jj = 0 + lane ; jj < cols ; jj += 31) {
-              vals1 [ local_warp_id * 32 + local_lane_id ] += sW[ (row*cols)+jj ] * x [jj];
-              vals2 [ local_warp_id * 32 + local_lane_id ] += sW[ ((row+256)*cols)+jj ] * x [jj];
-              vals3 [ local_warp_id * 32 + local_lane_id ] += sW[ ((row+512)*cols)+jj ] * x [jj];
+              vals1 [ pos ] += sW[ (row*cols)+jj ] * x [jj];
+              vals2 [ pos ] += sW[ ((row+256)*cols)+jj ] * x [jj];
+              vals3 [ pos ] += sW[ ((row+512)*cols)+jj ] * x [jj];
 	 }
                 // parallel reduction in shared memory
                 if ( lane < 16) { vals1 [ pos  ] += vals1 [ pos + 16]; vals2 [ pos  ] += vals2 [ pos + 16]; vals3 [ pos  ] += vals3 [ pos + 16];}
@@ -80,9 +81,9 @@ __device__ static inline float gpu_tanhf(float x) {
                 if ( lane < 1) { vals1 [ pos ] += vals1 [ pos + 1]; vals2 [ pos ] += vals2 [ pos + 1];vals3 [ pos ] += vals3 [ pos + 1]; }
                 // first thread OF EACH WARP ACCUMULATES the result
                 if ( lane == 0) {
-                  y[row] += vals1 [ local_lane_id ];
-                  y[row+256] += vals2 [ local_lane_id ];
-                  y[row+512] += vals3 [ local_lane_id ];
+                  y[row] += vals1 [ pos ];
+                  y[row+256] += vals2 [ pos ];
+                  y[row+512] += vals3 [ pos ];
       		  y[row] = gpu_logisticf(y[row]);
       		  y[row+256] = gpu_logisticf(y[row+256]);
       		  y[row+512] = gpu_tanhf(y[row+256] * y[row+512] + cinlocal);
@@ -95,13 +96,13 @@ __device__ static inline float gpu_tanhf(float x) {
 
       if( row < num_rows )
       {
-      	 vals1 [ local_warp_id * 32 + local_lane_id ] = b[row];
-      	 vals2 [ local_warp_id * 32 + local_lane_id ] = b[row+256];
-      	 vals3 [ local_warp_id * 32 + local_lane_id ] = b[row+512];
+      	 vals1 [  pos ] = b[row];
+      	 vals2 [ pos ] = b[row+256];
+      	 vals3 [ pos ] = b[row+512];
          for ( int jj = 0 + lane ; jj < cols ; jj += 31) {
-              vals1 [ local_warp_id * 32 + local_lane_id ] += W[ (row*cols)+jj ] * y [jj];
-              vals2 [ local_warp_id * 32 + local_lane_id ] += W[ ((row+256)*cols)+jj ] * y [jj];
-              vals3 [ local_warp_id * 32 + local_lane_id ] += W[ ((row+512)*cols)+jj ] * y [jj];
+              vals1 [ pos ] += W[ (row*cols)+jj ] * y [jj];
+              vals2 [ pos ] += W[ ((row+256)*cols)+jj ] * y [jj];
+              vals3 [ pos ] += W[ ((row+512)*cols)+jj ] * y [jj];
          }
                 // parallel reduction in shared memory
                 if ( lane < 16) { vals1 [ pos  ] += vals1 [ pos + 16]; vals2 [ pos  ] += vals2 [ pos + 16]; vals3 [ pos  ] += vals3 [ pos + 16];}
@@ -112,9 +113,9 @@ __device__ static inline float gpu_tanhf(float x) {
                 // first thread OF EACH WARP ACCUMULATES the result
                 if ( lane == 0) {
          	  x[row] = y[row]; // next invocation istate is from current ostate
-                  xnext[row] += vals1 [ local_lane_id ];
-                  xnext[row+256] += vals2 [ local_lane_id ];
-                  xnext[row+512] += vals3 [ local_lane_id ];
+                  xnext[row] += vals1 [ pos ];
+                  xnext[row+256] += vals2 [ pos ];
+                  xnext[row+512] += vals3 [ pos ];
                 }
       }
 
@@ -131,6 +132,7 @@ __device__ static inline float gpu_tanhf(float x) {
    
      y = d_g_y + index1 * 768;
      xnext = d_g_y + index2 * 768;
+
 
      if( row < num_rows )
      {
@@ -211,7 +213,7 @@ flappie_matrix aes_grumod_linear_gpu( const_flappie_matrix X, const_flappie_matr
     flappie_matrix Xnext = remake_flappie_matrix(NULL, W->nc, ostate->nc);
     RETURN_NULL_IF(NULL == Xnext, NULL);
 
-    float Cin[768], Cout[768], A[256*768];
+    float Cin[768], Cout[768];
     float *ostate_ptr;
     float *istate_ptr;
 
@@ -223,16 +225,21 @@ flappie_matrix aes_grumod_linear_gpu( const_flappie_matrix X, const_flappie_matr
     cudaStat = cudaMalloc (( void **)& d_y , 768*sizeof(float)); // device // memory alloc for y
     cudaStat = cudaMalloc (( void **)& d_xnext , 768*sizeof(float)); // device // memory alloc for xnext 
     cudaStat = cudaMalloc (( void **)& d_b , 768*sizeof(float)); // device // memory alloc for bias 
+    fprintf(stderr,"Allocating feature vector of bytes xnr=%d xnc=%d %d\n on device",X->nr,X->nc,768*N*sizeof(float)); 
+    fprintf(stderr,"Allocating ostate vector of bytes onr=%d onc=%d %d\n on device",ostate->nr,ostate->nc,ostate->nr*ostate->nc*sizeof(float)); 
     if(layer == 1) {
       cudaStat = cudaMalloc (( void **)& d_g_y , 768*N*sizeof(float)); // device // memory alloc for x 
       cudaMemcpy(d_g_y, X->data.f, 768*N*sizeof(float), cudaMemcpyHostToDevice);
     }
-    memcpy(A, sW->data.f, 256*768*sizeof(float));
     cudaMemcpy(d_a1, sW->data.f, 768*256*sizeof(float), cudaMemcpyHostToDevice);
     cudaMemcpy(d_a2, W->data.f, 768*256*sizeof(float), cudaMemcpyHostToDevice);
     cudaMemcpy(d_b, b->data.f, 768*sizeof(float), cudaMemcpyHostToDevice);
     float al =1.0f;
     float bet =1.0f;
+#else
+    for (size_t c = 0; c < Xnext->nc; c++) {
+        memcpy(Xnext->data.v + c * Xnext->nrq, b->data.v, Xnext->nrq * sizeof(__m128));
+    }
 #endif
 
     for (int i = 1; i < N; i++) {
@@ -267,15 +274,28 @@ flappie_matrix aes_grumod_linear_gpu( const_flappie_matrix X, const_flappie_matr
 		int threads_per_row = 32; // warp size
                 int threads_per_block = 512 ; //threads per block 512 or 768
 		int rows_per_block = threads_per_block/threads_per_row; // 16 or 24
+                //int num_blocks = 768/rows_per_block; // 48 or 32
                 int num_blocks = 768/rows_per_block; // 48 or 32
                 if(i == 1) 
                   cudaMemcpy(d_x, istate_ptr, N*sizeof(float), cudaMemcpyHostToDevice);
                 //cudaMemcpy(d_y, xCol.data.f, M*sizeof(float), cudaMemcpyHostToDevice);
-                //spmv_csr_scalar_kernel_with_activation<<<1, 256>>>(M/3, N, d_a1, d_a2, d_x, d_y, d_xnext, d_b, index, d_g_y, index2);
-                spmv_csr_vector_kernel_with_activation<<<num_blocks, threads_per_block>>>(M, N, d_a1, d_a2, d_x, d_y, d_xnext, d_b, index, d_g_y, index2);
+                spmv_csr_scalar_kernel_with_activation<<<1, 256>>>(M/3, N, d_a1, d_a2, d_x, d_y, d_xnext, d_b, index, d_g_y, index2);
+                //spmv_csr_vector_kernel_with_activation<<<num_blocks, threads_per_block>>>(M, N, d_a1, d_a2, d_x, d_y, d_xnext, d_b, index, d_g_y, index2);
                 //cudaMemcpy(XnextBuf.data.f, d_xnext, M*sizeof(float), cudaMemcpyDeviceToHost);
 #else
-                cblas_sgemv(CblasRowMajor, CblasNoTrans, 768, 256, 1.0, A, 256, istate_ptr, 1, 1.0, Cout, 1);
+                memcpy(Cin, xCol.data.f, 768*sizeof(float));
+                memcpy(Cout, xColTmp->data.f, 768*sizeof(float));
+                memcpy(Cout, Cin, 768 * sizeof(float) );
+                memset(Cout + size + size, 0, size *sizeof(float));
+
+                cblas_sgemv(CblasRowMajor, CblasNoTrans, 768, 256, 1.0, sW->data.f, 256, istate_ptr, 1, 1.0, Cout, 1);
+                for (size_t i = 0; i < size; i++) {
+                        Cout[i] = LOGISTICF(Cout[i]);
+                        Cout[size+i] = LOGISTICF(Cout[size+i]);
+                        Cout[i+size+size] = TANHF(Cout[i+size] * Cout[i+size+size] + Cin[i+size+size]);
+                        ostate_ptr[i] = (-1) * Cout[i] * Cout[i+size+size] + Cout[i+size+size];
+                        ostate_ptr[i] = Cout[i] * istate_ptr[i] + ostate_ptr[i];
+		}
                 cblas_sgemv(CblasRowMajor, CblasNoTrans, W->nc, W->nr, 1.0, W->data.f, W->stride, ostate_ptr, 1, 1.0, XnextBuf.data.f, 1);
 #endif
 
@@ -294,9 +314,9 @@ flappie_matrix aes_grumod_linear_gpu( const_flappie_matrix X, const_flappie_matr
     	cudaMemcpy(Xnext->data.f, d_g_y, 768*N*sizeof(float), cudaMemcpyDeviceToHost);
         cudaFree (d_g_y );
     }
-#endif
-
+#else
     //cblas_sgemm(CblasColMajor, CblasTrans, CblasNoTrans, W->nc, X->nc, W->nr, 1.0, W->data.f, W->stride, ostate->data.f, ostate->stride, 1.0, Xnext->data.f, Xnext->stride);
+#endif
     return Xnext;
 }
 
